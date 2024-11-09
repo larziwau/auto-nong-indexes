@@ -1,0 +1,81 @@
+name: Check YouTube Video IDs from JSON
+
+on:
+  push:
+    paths:
+      - 'official.json'
+  workflow_dispatch:
+
+jobs:
+  check_videos:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install google-api-python-client
+
+      - name: Read video IDs from JSON file
+        id: read_json
+        run: |
+          import json
+
+          with open('official.json', 'r') as f:
+              data = json.load(f)
+
+          video_ids = data.get('video_ids', [])
+          
+          with open('video_ids.txt', 'w') as f:
+              f.write('\n'.join(video_ids))
+          
+          print(f"Found {len(video_ids)} video IDs.")
+
+          print(f"video_ids={video_ids}")
+
+      - name: Check if YouTube videos exist
+        id: youtube_check
+        run: |
+          import sys
+          import googleapiclient.discovery
+          import googleapiclient.errors
+
+          with open('video_ids.txt', 'r') as f:
+              video_ids = f.read().splitlines()
+
+          api_key = "${{ secrets.YOUTUBE_API_KEY }}"
+
+          youtube = googleapiclient.discovery.build("youtube", "v3", developerKey=api_key)
+
+          failed_video_ids = []
+
+          for video_id in video_ids:
+              video_id = video_id.strip()  # Clean any leading/trailing spaces
+              print(f"Checking video ID: {video_id}")
+
+              try:
+                  request = youtube.videos().list(part="snippet", id=video_id)
+                  response = request.execute()
+
+                  if len(response["items"]) == 0:
+                      print(f"Video with ID {video_id} does not exist.")
+                      failed_video_ids.append(video_id)
+                  else:
+                      print(f"Video with ID {video_id} exists.")
+              except googleapiclient.errors.HttpError as error:
+                  print(f"An error occurred while checking video ID {video_id}: {error}")
+                  failed_video_ids.append(video_id)
+
+          if failed_video_ids:
+              print(f"The following videos do not exist or encountered errors: {', '.join(failed_video_ids)}")
+              sys.exit(1)  # Fail the action if any video ID is invalid
+          else:
+              print("All videos exist.")
